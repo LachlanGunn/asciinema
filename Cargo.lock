@@ -148,8 +148,7 @@ dependencies = [
 [[package]]
 name = "avt"
 version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19416eacf92afe8bdb0bf473b6c81dc9b4b2b833a6144fe18c739c4ef8a10671"
+source = "git+https://github.com/LachlanGunn/avt?branch=osc-markers#23fa20e03ca3aa385f51c08ec6513947e3173ae9"
 dependencies = [
  "unicode-width",
 ]
