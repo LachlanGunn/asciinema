@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
+use avt::ansi;
 use bytes::{Buf, BytesMut};
 use futures_util::future;
 use futures_util::stream::StreamExt;
@@ -60,6 +61,7 @@ struct Session<N: Notifier> {
     record_input: bool,
     time_offset: Duration,
     tty_size: TtySize,
+    ansi_parser: ansi::Parser,
 }
 
 #[async_trait]
@@ -95,6 +97,7 @@ pub async fn run<S: AsRef<str>, T: RawTty + ?Sized, N: Notifier>(
         record_input,
         time_offset: Duration::from_micros(0),
         tty_size: winsize.into(),
+        ansi_parser: Default::default(),
     };
 
     let result = session.run(pty, tty).await;
@@ -239,8 +242,24 @@ impl<N: Notifier> Session<N> {
             let text = self.output_decoder.feed(data);
 
             if !text.is_empty() {
+                // TODO: Get rid of the collect
+                let marker_names: Vec<_> = self.ansi_parser.feed(&text).filter_map(
+                |f| {
+                    if let ansi::Function::Osc(
+                            ansi::OscOp::AsciinemaSignalling(
+                              ansi::AsciinemaSignal::Marker{name})) = f {
+                        Some(name)
+                    } else {
+                        None
+                    }
+                }).collect();
                 let event = Event::Output(self.elapsed_time(), text);
                 self.send_session_event(event).await;
+
+                for name in marker_names {
+                    let marker_event = Event::Marker(self.elapsed_time(), name);
+                    self.send_session_event(marker_event).await;
+                }
             }
         }
     }

@@ -67,3 +67,6 @@ overflow-checks = false
 
 [features]
 macos-tty = []
+
+[patch.crates-io]
+avt = { git = "https://github.com/LachlanGunn/avt", branch = "osc-markers" }
