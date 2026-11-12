@@ -242,23 +242,52 @@ impl<N: Notifier> Session<N> {
             let text = self.output_decoder.feed(data);
 
             if !text.is_empty() {
-                // TODO: Get rid of the collect
-                let marker_names: Vec<_> = self.ansi_parser.feed(&text).filter_map(
-                |f| {
-                    if let ansi::Function::Osc(
-                            ansi::OscOp::AsciinemaSignalling(
-                              ansi::AsciinemaSignal::Marker{name})) = f {
-                        Some(name)
-                    } else {
-                        None
-                    }
-                }).collect();
-                let event = Event::Output(self.elapsed_time(), text);
-                self.send_session_event(event).await;
+                // We need to find OSC commands, which always end in ST or BEL, or before an ESC
+                // So let's split the text into chunks so that if an OSC is found, it will always be
+                // at the end.
+                let text_chunks = text.split_inclusive(['\x07', '\x1b', '\u{9c}']);
+                let mut start = 0;
+                let mut end = 0;
+                let mut events = Vec::new();
 
-                for name in marker_names {
-                    let marker_event = Event::Marker(self.elapsed_time(), name);
-                    self.send_session_event(marker_event).await;
+                for chunk in text_chunks {
+                    end += chunk.len();
+                    for parser_result in self.ansi_parser.feed(&chunk) {
+                        if let ansi::Function::Osc(
+                                ansi::OscOp::AsciinemaSignalling(
+                                  ansi::AsciinemaSignal::Marker{name})) = parser_result {
+
+                            let osc_end_index =
+                                if chunk.ends_with('\x1b')
+                                   && text[end..].starts_with('\\') {
+                                    end + 1
+                                } else {
+                                    end
+                                };
+
+                            let output_event = Event::Output(Duration::ZERO, text[start..osc_end_index].to_owned());
+                            events.push(output_event);
+
+                            let marker_event = Event::Marker(Duration::ZERO, name);
+                            events.push(marker_event);
+
+                            start = osc_end_index;
+                        }
+                    }
+                }
+
+                for e in events {
+                    let new_event = match e {
+                        Event::Output(_,t) => Event::Output(self.elapsed_time(), t),
+                        Event::Marker(_,n) => Event::Marker(self.elapsed_time(), n),
+                        _ => e
+                    };
+                    self.send_session_event(new_event).await;
+                }
+
+                if start != text.len() {
+                    let output_event = Event::Output(self.elapsed_time(), text[start..].to_owned());
+                    self.send_session_event(output_event).await;
                 }
             }
         }
